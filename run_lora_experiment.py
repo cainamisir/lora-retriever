@@ -12,10 +12,11 @@ Usage:
 """
 
 import argparse
-import contextlib
+import json
 import os
 import shutil
 import uuid
+from datetime import datetime
 from typing import Optional
 
 import torch
@@ -51,6 +52,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lora_alpha", type=int, default=32)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument("--device", type=str, default=None, help="Override torch device (e.g., cuda:0).")
+    parser.add_argument(
+        "--log_prompts",
+        action="store_true",
+        help="Print a compact version of the prompt sent to the model for debugging.",
+    )
+    parser.add_argument(
+        "--log_file",
+        default=None,
+        help="Optional path to a JSONL file for logging full prompts/responses/metrics. "
+        "Defaults to <output_dir>/logs/harness_run_<timestamp>.jsonl",
+    )
     return parser
 
 
@@ -63,6 +75,18 @@ def main():
     os.environ.setdefault("TRANSFORMERS_CACHE", model_cache_dir)
     os.environ.setdefault("HF_HOME", model_cache_dir)
     os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(model_cache_dir, "datasets"))
+
+    log_file_path = args.log_file
+    if log_file_path is None:
+        log_dir = os.path.join(args.output_dir, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file_path = os.path.join(
+            log_dir, f"harness_run_{datetime.now().strftime('%Y%m%dT%H%M%S')}.jsonl"
+        )
+    else:
+        log_dir = os.path.dirname(log_file_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
     device = torch.device(
         args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu")
@@ -170,6 +194,8 @@ def main():
 
     def inference_fn(example, lora_handle, harness):
         prompt = format_prompt(example.messages)
+        if args.log_prompts:
+            print(f"    prompt: {_compact_text(prompt)}")
         model = base_inference_model
         if lora_handle and lora_handle.path:
             adapter_name = ensure_adapter_loaded(lora_handle, trainable=False)
@@ -197,10 +223,14 @@ def main():
                     temperature=0.7,
                     top_p=0.9,
                 )
-        text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-        if text.startswith(prompt):
-            return text[len(prompt):].strip()
-        return text
+
+        # Only keep newly generated tokens (drop the prompt portion)
+        prompt_len = inputs["input_ids"].shape[1]
+        generated_ids = output_ids[0][prompt_len:]
+        if generated_ids.numel() == 0:  # fallback if model returned only prompt
+            generated_ids = output_ids[0]
+
+        return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
     def should_finetune(metrics: dict) -> bool:
         if not metrics:
@@ -218,6 +248,10 @@ def main():
             if isinstance(value, str) and value.strip():
                 return value
         return None
+
+    def _compact_text(text: str, limit: int = 160) -> str:
+        text = " ".join(text.split())
+        return text if len(text) <= limit else text[: limit - 3] + "..."
 
     def finetune_fn(example, lora_handle, response, metrics, harness):
         if not should_finetune(metrics):
@@ -331,12 +365,30 @@ def main():
 
     print("Starting harness run...")
     for idx, result in enumerate(harness.run(), start=1):
+        target_text = extract_target_text(result.example)
+        print(f"    response: {_compact_text(result.response)}")
+        if target_text:
+            print(f"    golden:   {_compact_text(target_text)}")
         print(
             f"[{idx}] dataset={result.example.dataset_name} "
             f"test_idx={result.example.test_idx} metrics={result.metrics} "
             f"retrieved={result.retrieved_lora.identifier if result.retrieved_lora else 'none'} "
             f"updated={result.updated_lora.identifier if result.updated_lora else 'none'}"
         )
+        log_entry = {
+            "dataset": result.example.dataset_name,
+            "test_idx": result.example.test_idx,
+            "prompt": format_prompt(result.example.messages),
+            "messages": result.example.messages,
+            "response": result.response,
+            "golden": target_text,
+            "metrics": result.metrics,
+            "retrieved_lora": result.retrieved_lora.identifier if result.retrieved_lora else None,
+            "updated_lora": result.updated_lora.identifier if result.updated_lora else None,
+            "metadata": result.example.metadata,
+        }
+        with open(log_file_path, "a", encoding="utf-8") as log_f:
+            log_f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":

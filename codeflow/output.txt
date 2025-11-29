@@ -1,0 +1,50 @@
+==> Building DP subset (top 20 by rating/elo with tag 'dp') from data/codeflowbench_full.jsonl
+Wrote 20 problems to output/bench_dp_single/dp_subset.jsonl
+==> Single-turn inference (LoRA), update_interval=2 train_lr=1e-6 r=4 alpha=4
+[LoRA] Using adapter 'binary search' (dir: output/bench_dp_single/adapters/binary search) for generation
+Finished: saved to output/bench_dp_single/lora_temp/1951H.json
+[INFER] problem=1951H tag=binary search update=no adapter_active=current
+[LoRA] Using adapter 'binary search' (dir: output/bench_dp_single/adapters/binary search) for generation
+[LoRA] tag=binary search seq_len=2747 mem_alloc=15.29GB mem_reserved=15.60GB
+[LoRA] CUDA OOM during train step; skipping update for tag='binary search'
+[LoRA] Updated adapter for tag='binary search' at output/bench_dp_single/adapters/binary search
+Finished: saved to output/bench_dp_single/lora_temp/2057F.json
+[INFER] problem=2057F tag=binary search update=yes adapter_active=output/bench_dp_single/adapters/binary search
+[LoRA] Using adapter 'bitmasks' (dir: output/bench_dp_single/adapters/bitmasks) for generation
+Finished: saved to output/bench_dp_single/lora_temp/1097H.json
+[INFER] problem=1097H tag=bitmasks update=no adapter_active=current
+[LoRA] Using adapter 'bitmasks' (dir: output/bench_dp_single/adapters/bitmasks) for generation
+[LoRA] tag=bitmasks seq_len=4096 mem_alloc=15.30GB mem_reserved=18.71GB
+[LoRA] CUDA OOM during train step; skipping update for tag='bitmasks'
+[LoRA] Updated adapter for tag='bitmasks' at output/bench_dp_single/adapters/bitmasks
+Finished: saved to output/bench_dp_single/lora_temp/1292F.json
+[INFER] problem=1292F tag=bitmasks update=yes adapter_active=output/bench_dp_single/adapters/bitmasks
+[LoRA] Using adapter 'bitmasks' (dir: output/bench_dp_single/adapters/bitmasks) for generation
+Finished: saved to output/bench_dp_single/lora_temp/1804H.json
+[INFER] problem=1804H tag=bitmasks update=no adapter_active=current
+[LoRA] Using adapter 'bitmasks' (dir: output/bench_dp_single/adapters/bitmasks) for generation
+[LoRA] tag=bitmasks seq_len=2697 mem_alloc=15.30GB mem_reserved=18.61GB
+[LoRA] CUDA OOM during train step; skipping update for tag='bitmasks'
+[LoRA] Updated adapter for tag='bitmasks' at output/bench_dp_single/adapters/bitmasks
+Finished: saved to output/bench_dp_single/lora_temp/865E.json
+[INFER] problem=865E tag=bitmasks update=yes adapter_active=output/bench_dp_single/adapters/bitmasks
+[LoRA] Using adapter 'combinatorics' (dir: output/bench_dp_single/adapters/combinatorics) for generation
+Finished: saved to output/bench_dp_single/lora_temp/1466H.json
+[INFER] problem=1466H tag=combinatorics update=no adapter_active=current
+[LoRA] Using adapter 'combinatorics' (dir: output/bench_dp_single/adapters/combinatorics) for generation
+[LoRA] tag=combinatorics seq_len=2362 mem_alloc=15.30GB mem_reserved=20.25GB
+[LoRA] CUDA OOM during train step; skipping update for tag='combinatorics'
+[LoRA] Updated adapter for tag='combinatorics' at output/bench_dp_single/adapters/combinatorics
+Finished: saved to output/bench_dp_single/lora_temp/1844H.json
+[INFER] problem=1844H tag=combinatorics update=yes adapter_active=output/bench_dp_single/adapters/combinatorics
+[LoRA] Using adapter 'combinatorics' (dir: output/bench_dp_single/adapters/combinatorics) for generation
+Finished: saved to output/bench_dp_single/lora_temp/1967E2.json
+[INFER] problem=1967E2 tag=combinatorics update=no adapter_active=current
+[LoRA] Using adapter 'combinatorics' (dir: output/bench_dp_single/adapters/combinatorics) for generation
+[LoRA] tag=combinatorics seq_len=1262 mem_alloc=15.30GB mem_reserved=18.61GB
+[LoRA] Updated adapter for tag='combinatorics' at output/bench_dp_single/adapters/combinatorics
+Finished: saved to output/bench_dp_single/lora_temp/623E.json
+[INFER] problem=623E tag=combinatorics update=yes adapter_active=output/bench_dp_single/adapters/combinatorics
+[LoRA] Using adapter 'combinatorics' (dir: output/bench_dp_single/adapters/combinatorics) for generation
+Finished: saved to output/bench_dp_single/lora_temp/848E.json
+[INFER] problem=848E tag=combinatorics update=no adapter_active=current

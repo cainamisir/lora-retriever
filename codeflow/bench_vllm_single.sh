@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Benchmark: single-turn pipeline on a DP subset (50 problems) with optional LoRA updates.
-# Uses run/single_turn/inference_lora.py + harness + stats.
+# Benchmark: single-turn pipeline using vLLM (no LoRA) on a lowest-ELO subset.
+# Reuses the same combine/harness/stats steps as bench_dp_single.sh but runs
+# inference via codeflow/run/single_turn/inference_local.py (vLLM).
 #
 print_help() {
   cat <<'EOF'
-Usage: bash bench_dp_single.sh [options]
+Usage: bash bench_vllm_single.sh [options]
   --model_path PATH          HF id or local path (default: Qwen/Qwen2.5-Coder-7B-Instruct)
   --input_file PATH          Input JSONL (default: data/codeflowbench_full.jsonl)
-  --device DEV               Inference device (default: cuda:0)
-  --train_device DEV         Train device (default: same as --device)
-  --update_interval N        Apply LoRA update every N problems per tag (0 disables LoRA; default: 8)
-  --train_lr LR              LoRA learning rate (default: 5e-6)
-  --lora_r R                 LoRA rank (default: 8)
-  --lora_alpha ALPHA         LoRA alpha (default: 32)
-  --num_samples N            Generations per subproblem (for pass@k; default: 1)
-  --device_map MAP           HF device_map for sharding (e.g., auto) (default: none; empty string forces GPU-only on the first visible device)
-  --train_max_length N       Max tokens for LoRA training truncation (default: 2048)
+  --tensor_parallel_size N   vLLM tensor parallel size (default: 1)
+  --max_model_len N          vLLM max model len (default: 4096)
+  --max_new_tokens N         Max new tokens to generate (default: 512)
+  --temperature T            Sampling temperature (default: 0.6)
+  --top_p P                  Top-p nucleus sampling (default: 0.9)
+  --dtype DTYPE              vLLM dtype (auto, float16, bfloat16, float32; default: auto)
+  --gpu_memory_utilization F Fraction of GPU memory to use (default: 0.8)
   --max_problems N           Subset size (default: 50)
   -h, --help                 Show this help
 EOF
@@ -25,55 +24,48 @@ EOF
 
 MODEL_PATH="Qwen/Qwen2.5-Coder-7B-Instruct"
 INPUT_FILE="data/codeflowbench_full.jsonl"
-DEVICE="cuda:0"
-TRAIN_DEVICE=""
-UPDATE_INTERVAL=8
-TRAIN_LR=5e-6
-LORA_R=8
-LORA_ALPHA=32
-NUM_SAMPLES=1
-DEVICE_MAP=""
-MAX_PROBLEMS=100
-LOAD_IN_8BIT=""
-LOAD_IN_4BIT=""
-TRAIN_MAX_LENGTH=2048
+TENSOR_PARALLEL_SIZE=1
+MAX_MODEL_LEN=4096
+MAX_NEW_TOKENS=512
+TEMPERATURE=0.6
+TOP_P=0.9
+DTYPE="auto"
+GPU_MEM_UTIL=0.8
+MAX_PROBLEMS=50
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model_path) MODEL_PATH="$2"; shift 2 ;;
     --input_file) INPUT_FILE="$2"; shift 2 ;;
-    --device) DEVICE="$2"; shift 2 ;;
-    --train_device) TRAIN_DEVICE="$2"; shift 2 ;;
-    --update_interval) UPDATE_INTERVAL="$2"; shift 2 ;;
-    --train_lr) TRAIN_LR="$2"; shift 2 ;;
-    --lora_r) LORA_R="$2"; shift 2 ;;
-    --lora_alpha) LORA_ALPHA="$2"; shift 2 ;;
-    --num_samples) NUM_SAMPLES="$2"; shift 2 ;;
-    --device_map) DEVICE_MAP="$2"; shift 2 ;;
-    --train_max_length) TRAIN_MAX_LENGTH="$2"; shift 2 ;;
+    --tensor_parallel_size) TENSOR_PARALLEL_SIZE="$2"; shift 2 ;;
+    --max_model_len) MAX_MODEL_LEN="$2"; shift 2 ;;
+    --max_new_tokens) MAX_NEW_TOKENS="$2"; shift 2 ;;
+    --temperature) TEMPERATURE="$2"; shift 2 ;;
+    --top_p) TOP_P="$2"; shift 2 ;;
+    --dtype) DTYPE="$2"; shift 2 ;;
+    --gpu_memory_utilization) GPU_MEM_UTIL="$2"; shift 2 ;;
     --max_problems) MAX_PROBLEMS="$2"; shift 2 ;;
-    --load_in_8bit) LOAD_IN_8BIT="1"; shift 1 ;;
-    --load_in_4bit) LOAD_IN_4BIT="1"; shift 1 ;;
     -h|--help) print_help; exit 0 ;;
     *) echo "Unknown arg: $1"; print_help; exit 1 ;;
   esac
 done
 
-TRAIN_DEVICE="${TRAIN_DEVICE:-$DEVICE}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 MODEL_BASENAME="$(basename "$MODEL_PATH")"
-MODEL_NAME="${MODEL_BASENAME}-lora"
+MODEL_NAME="${MODEL_BASENAME}-vllm-base"
 
-MAX_PROBLEMS=100
-OUT_ROOT="output/bench_dp_single"
-ADAPTER_ROOT="$OUT_ROOT/adapters"
-mkdir -p "$OUT_ROOT" "$ADAPTER_ROOT"
-rm -rf "$ADAPTER_ROOT"/* "$OUT_ROOT/lora_temp" "$OUT_ROOT/${MODEL_NAME}_harness_temp"
+OUT_ROOT="output/bench_vllm_single"
+mkdir -p "$OUT_ROOT"
+
+SUBSET_FILE="$OUT_ROOT/subset.jsonl"
+
+# Clean old outputs for this run
+rm -rf "$OUT_ROOT/base_temp" "$OUT_ROOT/${MODEL_NAME}_harness_temp"
 rm -f "$OUT_ROOT/${MODEL_NAME}_stats.json" \
       "output/inference/${MODEL_NAME}_single_turn.json" \
       "output/harness/${MODEL_NAME}_single_turn.json"
-
-SUBSET_FILE="$OUT_ROOT/dp_subset.jsonl"
 
 echo "==> Building subset (lowest $MAX_PROBLEMS by rating/elo across all problems) from $INPUT_FILE"
 python - <<'PY' "$INPUT_FILE" "$SUBSET_FILE" "$MAX_PROBLEMS"
@@ -108,27 +100,20 @@ for obj in subset:
     print(f"{rating}\t{pid}\t{title}")
 PY
 
-OUT_TEMP="$OUT_ROOT/lora_temp"
+OUT_TEMP="$OUT_ROOT/base_temp"
 
-echo "==> Single-turn inference (LoRA), update_interval=$UPDATE_INTERVAL train_lr=$TRAIN_LR r=$LORA_R alpha=$LORA_ALPHA"
-python run/single_turn/inference_lora.py \
+echo "==> Single-turn inference (vLLM base), tp_size=$TENSOR_PARALLEL_SIZE dtype=$DTYPE"
+python run/single_turn/inference_local.py \
   --model_path "$MODEL_PATH" \
   --input_file "$SUBSET_FILE" \
   --output_dir "$OUT_TEMP" \
-  --adapter_root "$ADAPTER_ROOT" \
-  --device "$DEVICE" \
-  --train_device "$TRAIN_DEVICE" \
-  --update_interval "$UPDATE_INTERVAL" \
-  --train_lr "$TRAIN_LR" \
-  --lora_r "$LORA_R" \
-  --lora_alpha "$LORA_ALPHA" \
-  --target_modules "all-linear" \
-  ${LOAD_IN_8BIT:+--load_in_8bit} \
-  ${LOAD_IN_4BIT:+--load_in_4bit} \
-  --bnb_compute_dtype "bfloat16" \
-  --train_max_length "$TRAIN_MAX_LENGTH" \
-  --num_samples "$NUM_SAMPLES" \
-  ${DEVICE_MAP:+--device_map "$DEVICE_MAP"}
+  --tensor_parallel_size "$TENSOR_PARALLEL_SIZE" \
+  --max_model_len "$MAX_MODEL_LEN" \
+  --max_new_tokens "$MAX_NEW_TOKENS" \
+  --temperature "$TEMPERATURE" \
+  --top_p "$TOP_P" \
+  --dtype "$DTYPE" \
+  --gpu_memory_utilization "$GPU_MEM_UTIL"
 
 echo "==> Combine inference"
 python run/single_turn/combined.py \
@@ -159,7 +144,8 @@ stats_path = sys.argv[1]
 data = json.load(open(stats_path))
 overall = data["summary"]["overall"]
 print(f"Overall all_pass1={overall.get('all_pass1')} over {overall.get('all_number')}")
-for k,v in data["summary"].items():
-    if k == "overall": continue
+for k, v in data["summary"].items():
+    if k == "overall":
+        continue
     print(f"{k}: {v}")
 PY

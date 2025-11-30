@@ -1,0 +1,10 @@
+ CUDA_VISIBLE_DEVICES=0,1 bash bench_dp_single.sh \
+    --model_path Qwen/Qwen2.5-Coder-7B-Instruct \
+    --input_file data/codeflowbench_full.jsonl \
+    --device cuda:0 \
+    --update_interval 2 \
+    --train_lr 5e-6 \
+    --lora_r 8 \
+    --lora_alpha 32 \
+    --num_samples 1 \
+    --device_map auto
